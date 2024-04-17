@@ -16,36 +16,38 @@ from tqdm import tqdm
 from vampire.common.util import read_text, save_sparse, write_to_json
 
 
-def load_data(data_path: str, tokenize: bool = False, tokenizer_type: str = "just_spaces") -> List[str]:
+def load_data(data_folder: str, tokenize: bool = False, tokenizer_type: str = "just_spaces") -> List[str]:
     if tokenizer_type == "just_spaces":
         tokenizer = SpacyWordSplitter()
     elif tokenizer_type == "spacy":
         nlp = spacy.load('en')
         tokenizer = Tokenizer(nlp.vocab)
     tokenized_examples = []
-    with tqdm(open(data_path, "r"), desc=f"loading {data_path}") as f:
-        for line in f:
-            if data_path.endswith(".jsonl") or data_path.endswith(".json"):
-                example = json.loads(line)
-            else:
-                example = {"text": line}
-            if tokenize:
-                if tokenizer_type == 'just_spaces':
-                    tokens = list(map(str, tokenizer.split_words(example['text'])))
-                elif tokenizer_type == 'spacy':
-                    tokens = list(map(str, tokenizer(example['text'])))
-                text = ' '.join(tokens)
-            else:
-                text = example['text']
-            tokenized_examples.append(text)
+    for file in os.listdir(data_folder):
+        data_path = os.path.join(data_folder, file)
+        with tqdm(open(data_path, "r"), desc=f"loading {data_path}") as f:
+            for line in f:
+                if data_path.endswith(".jsonl") or data_path.endswith(".json"):
+                    example = json.loads(line)
+                else:
+                    example = {"text": line}
+                if tokenize:
+                    if tokenizer_type == 'just_spaces':
+                        tokens = list(map(str, tokenizer.split_words(example['text'])))
+                    elif tokenizer_type == 'spacy':
+                        tokens = list(map(str, tokenizer(example['text'])))
+                    text = ' '.join(tokens)
+                else:
+                    text = example['text']
+                tokenized_examples.append(text)
     return tokenized_examples
 
 def main():
     parser = argparse.ArgumentParser(formatter_class = argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--train-path", type=str, required=True,
-                        help="Path to the train jsonl file.")
+                        help="Path to the train jsonl files.")
     parser.add_argument("--dev-path", type=str, required=True,
-                        help="Path to the dev jsonl file.")
+                        help="Path to the dev jsonl files.")
     parser.add_argument("--serialization-dir", "-s", type=str, required=True,
                         help="Path to store the preprocessed output.")
     parser.add_argument("--tfidf", action='store_true',
@@ -101,7 +103,7 @@ def main():
         print("fitting reference corpus...")
         reference_matrix = reference_vectorizer.fit_transform(tqdm(reference_examples))
 
-    reference_vocabulary = reference_vectorizer.get_feature_names()
+    reference_vocabulary = reference_vectorizer.vocabulary_ #.keys()
 
     # add @@unknown@@ token vector
     vectorized_train_examples = sparse.hstack((np.array([0] * len(tokenized_train_examples))[:,None], vectorized_train_examples))
@@ -110,7 +112,7 @@ def main():
 
     # generate background frequency
     print("generating background frequency...")
-    bgfreq = dict(zip(count_vectorizer.get_feature_names(), (np.array(master.sum(0)) / args.vocab_size).squeeze()))
+    bgfreq = dict(zip(count_vectorizer.vocabulary_, (np.array(master.sum(0)) / args.vocab_size).squeeze()))
 
     print("saving data...")
     save_sparse(vectorized_train_examples, os.path.join(args.serialization_dir, "train.npz"))
@@ -121,7 +123,7 @@ def main():
     write_to_json(reference_vocabulary, os.path.join(args.serialization_dir, "reference", "ref.vocab.json"))
     write_to_json(bgfreq, os.path.join(args.serialization_dir, "vampire.bgfreq"))
     
-    write_list_to_file(['@@UNKNOWN@@'] + count_vectorizer.get_feature_names(), os.path.join(vocabulary_dir, "vampire.txt"))
+    write_list_to_file(['@@UNKNOWN@@'] + list(count_vectorizer.vocabulary_.keys()), os.path.join(vocabulary_dir, "vampire.txt"))
     write_list_to_file(['*tags', '*labels', 'vampire'], os.path.join(vocabulary_dir, "non_padded_namespaces.txt"))
 
 def write_list_to_file(ls, save_path):
